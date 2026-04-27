@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Network Monitor</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #f5f5f5;
+    --surface: #ffffff;
+    --border:  rgba(0,0,0,0.1);
+    --text:    #111;
+    --muted:   #666;
+    --tcp:     #2563eb;
+    --udp:     #059669;
+    --icmp:    #b45309;
+    --arp:     #7c3aed;
+    --danger:  #ef4444;
+    --radius:  8px;
+    --mono:    'Courier New', monospace;
+    --sans:    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1a1a; --surface:#242424; --border:rgba(255,255,255,0.1); --text:#e8e8e8; --muted:#888; }
+    .badge-tcp  { background:#1e3a8a; color:#93c5fd; }
+    .badge-udp  { background:#064e3b; color:#6ee7b7; }
+    .badge-icmp { background:#78350f; color:#fcd34d; }
+    .badge-arp  { background:#4c1d95; color:#c4b5fd; }
+    .badge-other{ background:#333;    color:#888; }
+    .btn-unblock:hover { background:#2d1a1a; }
+  }
+
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; min-height:100vh; }
+
+  header { background:var(--surface); border-bottom:1px solid var(--border); padding:12px 20px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10; }
+  .header-left { display:flex; align-items:center; gap:10px; }
+  .header-left h1 { font-size:15px; font-weight:600; }
+  #stext { font-size:13px; color:var(--muted); font-family:var(--mono); }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:#aaa; display:inline-block; }
+  .status-dot.live { background:#22c55e; }
+  .header-right { display:flex; gap:8px; }
+  button { font-size:13px; padding:5px 14px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer; font-family:var(--sans); }
+  button:hover { background:var(--bg); }
+
+  .stats-row { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; padding:16px 20px 0; }
+  .stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
+  .stat-label { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .stat-value { font-size:24px; font-weight:600; font-family:var(--mono); }
+  .stat-value.tcp    { color:var(--tcp); }
+  .stat-value.udp    { color:var(--udp); }
+  .stat-value.icmp   { color:var(--icmp); }
+  .stat-value.danger { color:var(--danger); }
+
+  .content { display:grid; grid-template-columns:1fr 220px; gap:12px; padding:12px 20px 0; }
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  .panel-header { padding:10px 14px; border-bottom:1px solid var(--border); font-size:13px; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+  .panel-header span { font-size:12px; color:var(--muted); font-weight:400; font-family:var(--mono); }
+
+  .filter-row { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center; }
+  .filter-row input, .filter-row select { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); outline:none; font-family:var(--sans); }
+  .filter-row input { width:150px; }
+
+  .table-scroll { max-height:340px; overflow-y:auto; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  thead th { text-align:left; padding:7px 14px; font-size:11px; font-weight:600; color:var(--muted); border-bottom:1px solid var(--border); background:var(--bg); text-transform:uppercase; letter-spacing:0.5px; }
+  tbody tr { border-bottom:1px solid var(--border); animation:fadeRow 0.15s ease; }
+  tbody tr:hover { background:var(--bg); }
+  tbody td { padding:7px 14px; font-family:var(--mono); }
+
+  .badge { font-size:11px; padding:2px 7px; border-radius:4px; font-family:var(--sans); font-weight:600; }
+  .badge-tcp   { background:#dbeafe; color:#1e40af; }
+  .badge-udp   { background:#d1fae5; color:#065f46; }
+  .badge-icmp  { background:#fef3c7; color:#92400e; }
+  .badge-arp   { background:#ede9fe; color:#4c1d95; }
+  .badge-other { background:#f3f4f6; color:#6b7280; }
+  .text-muted  { color:var(--muted); }
+
+  .side-panel { display:flex; flex-direction:column; gap:12px; }
+  .bar-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .bar-label { font-size:12px; width:36px; color:var(--muted); font-family:var(--mono); }
+  .bar-track { flex:1; height:5px; background:var(--border); border-radius:3px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:3px; transition:width 0.4s ease; }
+  .bar-cnt { font-size:12px; width:28px; text-align:right; color:var(--muted); font-family:var(--mono); }
+
+  .port-row { display:flex; justify-content:space-between; padding:6px 14px; border-bottom:1px solid var(--border); font-size:12px; font-family:var(--mono); }
+  .port-name { color:var(--muted); font-size:11px; margin-left:4px; }
+  .empty-state { padding:20px; text-align:center; color:var(--muted); font-size:13px; }
+
+  /* DDoS section */
+  .ddos-section { padding:12px 20px 20px; }
+  .ddos-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .alert-scroll { max-height:200px; overflow-y:auto; }
+  .alert-row { display:flex; align-items:flex-start; gap:10px; padding:8px 14px; border-bottom:1px solid var(--border); font-size:12px; animation:fadeRow 0.2s ease; }
+  .alert-dot { width:7px; height:7px; border-radius:50%; background:var(--danger); margin-top:3px; flex-shrink:0; }
+  .alert-dot.info { background:#3b82f6; }
+  .alert-ip { font-family:var(--mono); font-weight:600; }
+  .alert-reason { color:var(--muted); font-size:11px; margin-top:2px; }
+  .alert-ts { color:var(--muted); font-size:11px; margin-left:auto; white-space:nowrap; flex-shrink:0; }
+  .blocked-row { display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-bottom:1px solid var(--border); font-size:12px; }
+  .blocked-ip { font-family:var(--mono); font-weight:600; color:var(--danger); }
+  .blocked-meta { color:var(--muted); font-size:11px; margin-top:2px; }
+  .btn-unblock { font-size:11px; padding:3px 10px; border-radius:4px; border:1px solid var(--danger); color:var(--danger); background:transparent; cursor:pointer; }
+  .btn-unblock:hover { background:#fef2f2; }
+
+  @keyframes fadeRow { from { opacity:0; } to { opacity:1; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <span class="status-dot" id="sdot"></span>
+    <h1>Network Monitor</h1>
+    <span id="stext">idle</span>
+  </div>
+  <div class="header-right">
+    <span id="db-pill" style="font-size:12px;font-family:var(--mono);color:var(--muted);display:flex;align-items:center;gap:6px;">
+      <span id="db-dot" style="width:7px;height:7px;border-radius:50%;background:#aaa;display:inline-block;"></span>
+      <span id="db-text">MongoDB</span>
+    </span>
+    <button onclick="startCap()">Start</button>
+    <button onclick="stopCap()">Stop</button>
+    <button onclick="clearAll()">Clear</button>
+  </div>
+</header>
+
+<div class="stats-row">
+  <div class="stat"><div class="stat-label">Total packets</div><div class="stat-value" id="s-total">0</div></div>
+  <div class="stat"><div class="stat-label">TCP</div><div class="stat-value tcp" id="s-tcp">0</div></div>
+  <div class="stat"><div class="stat-label">UDP</div><div class="stat-value udp" id="s-udp">0</div></div>
+  <div class="stat"><div class="stat-label">ICMP / ARP</div><div class="stat-value icmp" id="s-other">0</div></div>
+  <div class="stat"><div class="stat-label">Blocked IPs</div><div class="stat-value danger" id="s-blocked">0</div></div>
+</div>
+
+<div class="content">
+  <div class="panel">
+    <div class="panel-header">Live packets <span id="pkts-count">0 captured</span></div>
+    <div class="filter-row">
+      <input type="text" id="fip" placeholder="Filter by IP..." oninput="applyFilter()"/>
+      <select id="fproto" onchange="applyFilter()">
+        <option value="">All protocols</option>
+        <option>TCP</option><option>UDP</option><option>ICMP</option><option>ARP</option>
+      </select>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Source</th><th>Destination</th><th>Proto</th><th>Flags</th><th>Len</th></tr></thead>
+        <tbody id="ptable"></tbody>
+      </table>
+      <div class="empty-state" id="empty">Waiting for packets...</div>
+    </div>
+  </div>
+
+  <div class="side-panel">
+    <div class="panel">
+      <div class="panel-header">Protocol breakdown</div>
+      <div style="padding:12px 14px;">
+        <div class="bar-row"><span class="bar-label">TCP</span><div class="bar-track"><div class="bar-fill" id="b-tcp" style="background:var(--tcp);width:0%"></div></div><span class="bar-cnt" id="bc-tcp">0</span></div>
+        <div class="bar-row"><span class="bar-label">UDP</span><div class="bar-track"><div class="bar-fill" id="b-udp" style="background:var(--udp);width:0%"></div></div><span class="bar-cnt" id="bc-udp">0</span></div>
+        <div class="bar-row"><span class="bar-label">ICMP</span><div class="bar-track"><div class="bar-fill" id="b-icmp" style="background:var(--icmp);width:0%"></div></div><span class="bar-cnt" id="bc-icmp">0</span></div>
+        <div class="bar-row"><span class="bar-label">ARP</span><div class="bar-track"><div class="bar-fill" id="b-arp" style="background:var(--arp);width:0%"></div></div><span class="bar-cnt" id="bc-arp">0</span></div>
+        <div class="bar-row"><span class="bar-label">Other</span><div class="bar-track"><div class="bar-fill" id="b-other" style="background:#aaa;width:0%"></div></div><span class="bar-cnt" id="bc-other">0</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Top ports</div>
+      <div id="top-ports"><div class="empty-state">No data yet</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- DDoS Protection Section -->
+<div class="ddos-section">
+  <div class="ddos-grid">
+    <div class="panel">
+      <div class="panel-header">DDoS alerts <span id="alert-count">0 alerts</span></div>
+      <div class="alert-scroll" id="alert-list">
+        <div class="empty-state">No alerts yet</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Blocked IPs <span id="blocked-count">0 blocked</span></div>
+      <div id="blocked-list">
+        <div class="empty-state">No blocked IPs</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let allPkts=[], portMap={}, stats={total:0,tcp:0,udp:0,icmp:0,arp:0,other:0};
+  let live=false, es=null, alertEs=null;
+  const KNOWN={80:'HTTP',443:'HTTPS',22:'SSH',53:'DNS',21:'FTP',25:'SMTP',3306:'MySQL',5432:'PG',8080:'alt-HTTP',3389:'RDP'};
+
+  // ── Status ────────────────────────────────────────────
+  function setLive(v) {
+    live=v;
+    document.getElementById('sdot').className='status-dot'+(v?' live':'');
+    document.getElementById('stext').textContent=v?'capturing':'idle';
+  }
+
+  // ── Controls ──────────────────────────────────────────
+  function startCap() {
+    if(live) return;
+    fetch('/start',{method:'POST'}).then(()=>{setLive(true);if(!es)connectSSE();if(!alertEs)connectAlertStream();}).catch(()=>console.error('Start failed'));
+  }
+
+  function stopCap() {
+    fetch('/stop',{method:'POST'}).catch(()=>{});
+    setLive(false);
+    if(es){es.close();es=null;}
+  }
+
+  function clearAll() {
+    allPkts=[];portMap=[];stats={total:0,tcp:0,udp:0,icmp:0,arp:0,other:0};
+    document.getElementById('ptable').innerHTML='';
+    document.getElementById('empty').style.display='';
+    document.getElementById('top-ports').innerHTML='<div class="empty-state">No data yet</div>';
+    document.getElementById('pkts-count').textContent='0 captured';
+    updateStats();
+  }
+
+  // ── Packet SSE ────────────────────────────────────────
+  function connectSSE() {
+    es=new EventSource('/stream');
+    es.onmessage=e=>{if(e.data.startsWith(':'))return;try{ingest(JSON.parse(e.data));}catch{}};
+    es.onerror=()=>{es.close();es=null;};
+  }
+
+  function ingest(pkt) {
+    allPkts.unshift(pkt);
+    if(allPkts.length>500) allPkts.pop();
+    const p=(pkt.protocol||'').toUpperCase();
+    stats.total++;
+    if(p==='TCP')stats.tcp++;
+    else if(p==='UDP')stats.udp++;
+    else if(p==='ICMP')stats.icmp++;
+    else if(p==='ARP')stats.arp++;
+    else stats.other++;
+    const port=pkt.dst_port;
+    if(port&&port!=='N/A') portMap[port]=(portMap[port]||0)+1;
+    updateStats();
+    renderRow(pkt);
+    renderPorts();
+  }
+
+  function updateStats() {
+    document.getElementById('s-total').textContent=stats.total;
+    document.getElementById('s-tcp').textContent=stats.tcp;
+    document.getElementById('s-udp').textContent=stats.udp;
+    document.getElementById('s-other').textContent=stats.icmp+stats.arp;
+    const t=stats.total||1;
+    const upd=(b,c,v)=>{document.getElementById(b).style.width=Math.round(v/t*100)+'%';document.getElementById(c).textContent=v;};
+    upd('b-tcp','bc-tcp',stats.tcp);
+    upd('b-udp','bc-udp',stats.udp);
+    upd('b-icmp','bc-icmp',stats.icmp);
+    upd('b-arp','bc-arp',stats.arp);
+    upd('b-other','bc-other',stats.other);
+  }
+
+  function renderRow(pkt) {
+    const ip=document.getElementById('fip').value.trim().toLowerCase();
+    const pr=document.getElementById('fproto').value;
+    const src=(pkt.src_ip||'').toLowerCase();
+    const dst=(pkt.dst_ip||'').toLowerCase();
+    const proto=(pkt.protocol||'').toUpperCase();
+    if(ip&&!src.includes(ip)&&!dst.includes(ip)) return;
+    if(pr&&proto!==pr) return;
+    document.getElementById('empty').style.display='none';
+    const tbody=document.getElementById('ptable');
+    if(tbody.children.length>=150) tbody.lastElementChild?.remove();
+    const cls=['TCP','UDP','ICMP','ARP'].includes(proto)?proto.toLowerCase():'other';
+    const ts=(pkt.timestamp||'').slice(11,19);
+    const srcPort=pkt.src_port&&pkt.src_port!=='N/A'?':'+pkt.src_port:'';
+    const dstPort=pkt.dst_port&&pkt.dst_port!=='N/A'?':'+pkt.dst_port:'';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td class="text-muted">${ts}</td><td>${pkt.src_ip||'—'}${srcPort}</td><td>${pkt.dst_ip||'—'}${dstPort}</td><td><span class="badge badge-${cls}">${proto}</span></td><td class="text-muted">${pkt.flags||'—'}</td><td class="text-muted">${pkt.length||'—'}</td>`;
+    tbody.prepend(tr);
+    document.getElementById('pkts-count').textContent=allPkts.length+' captured';
+  }
+
+  function renderPorts() {
+    const sorted=Object.entries(portMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    if(!sorted.length) return;
+    document.getElementById('top-ports').innerHTML=sorted.map(([port,cnt])=>
+      `<div class="port-row"><span>${port}${KNOWN[port]?'<span class="port-name">('+KNOWN[port]+')</span>':''}</span><span>${cnt}</span></div>`
+    ).join('');
+  }
+
+  function applyFilter() {
+    document.getElementById('ptable').innerHTML='';
+    allPkts.slice(0,150).forEach(renderRow);
+  }
+
+  // ── DDoS alert SSE ────────────────────────────────────
+  function connectAlertStream() {
+    alertEs=new EventSource('/ddos/stream');
+    alertEs.onmessage=e=>{
+      if(e.data.startsWith(':')) return;
+      try{ addAlertRow(JSON.parse(e.data)); refreshBlocked(); }catch{}
+    };
+    alertEs.onerror=()=>{alertEs.close();alertEs=null;setTimeout(connectAlertStream,2000);};
+  }
+
+  function addAlertRow(a) {
+    const box=document.getElementById('alert-list');
+    const empty=box.querySelector('.empty-state');
+    if(empty) empty.remove();
+    if(box.children.length>=30) box.lastElementChild?.remove();
+    const ts=(a.timestamp||'').slice(11,19);
+    const div=document.createElement('div');
+    div.className='alert-row';
+    div.innerHTML=`<span class="alert-dot${a.level==='info'?' info':''}"></span>
+      <div><div class="alert-ip">${a.ip}</div><div class="alert-reason">${a.reason}</div></div>
+      <span class="alert-ts">${ts}</span>`;
+    box.prepend(div);
+    const count=box.querySelectorAll('.alert-row').length;
+    document.getElementById('alert-count').textContent=count+' alert'+(count!==1?'s':'');
+  }
+
+  function refreshBlocked() {
+    fetch('/ddos/blocked').then(r=>r.json()).then(data=>{
+      const ips=Object.keys(data);
+      document.getElementById('s-blocked').textContent=ips.length;
+      document.getElementById('blocked-count').textContent=ips.length+' blocked';
+      const box=document.getElementById('blocked-list');
+      box.innerHTML='';
+      if(!ips.length){box.innerHTML='<div class="empty-state">No blocked IPs</div>';return;}
+      ips.forEach(ip=>{
+        const info=data[ip];
+        const ts=(info.blocked_at||'').slice(11,19);
+        const div=document.createElement('div');
+        div.className='blocked-row';
+        div.innerHTML=`<div><div class="blocked-ip">${ip}</div><div class="blocked-meta">${ts} — ${info.reason||''}</div></div>
+          <button class="btn-unblock" onclick="unblockIP('${ip}')">Unblock</button>`;
+        box.appendChild(div);
+      });
+    }).catch(()=>{});
+  }
+
+  function unblockIP(ip) {
+    if(!confirm('Unblock '+ip+'?')) return;
+    fetch('/ddos/unblock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip})})
+      .then(r=>r.json()).then(()=>refreshBlocked()).catch(()=>{});
+  }
+
+  // ── Init ──────────────────────────────────────────────
+  fetch('/status').then(r=>r.json()).then(s=>{
+    if(s.sniffing){setLive(true);connectSSE();}
+    updateDbStatus(s.db_connected);
+  }).catch(()=>{});
+
+  function updateDbStatus(connected) {
+    document.getElementById('db-dot').style.background = connected ? '#22c55e' : '#ef4444';
+    document.getElementById('db-text').textContent = connected ? 'MongoDB connected' : 'MongoDB offline';
+  }
+
+  // Poll db stats every 5s
+  function pollDbStats() {
+    fetch('/db/stats').then(r=>r.json()).then(s=>{
+      updateDbStatus(s.connected);
+    }).catch(()=>{});
+  }
+
+  connectAlertStream();
+  setInterval(refreshBlocked, 4000);
+  setInterval(pollDbStats, 5000);
+  refreshBlocked();
+  pollDbStats();
+</script>
+</body>
+</html>
